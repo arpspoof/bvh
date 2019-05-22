@@ -55,12 +55,12 @@ namespace bvh
                 $"{tabs}}}\n";
         }
 
-        public static string GenMotionHeader(int nFrame, double fps, double y)
+        public static string GenMotionHeader(int nFrame, double fps)
         {
             return $"MOTION\n" +
                 $"Frames: {nFrame + 1}\n" +
                 $"Frame Time: {1.0 / fps}\n" +
-                $"0 18.08466 0 0 0 0 0 0 0 0 -90 0 0 0 0 0 0 0 0 0 -90 0 0 0 0 0 0 0 0 90 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+                $"0 18.08466 0 0 0 0 0 0 0 0 -90 0 0 0 0 0 0 0 0 0 -90 0 0 0 0 0 0 0 0 90 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
         }
     }
 }

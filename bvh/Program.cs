@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using static bvh.MathQ;
 using static bvh.Parsing;
 using static bvh.BVHBasic;
@@ -18,6 +19,11 @@ namespace bvh
         private static CameraOptions cameraOptions = CameraOptions.XZ_YRotSmoothed;
         private static double yRotSmoothFactor = 0.05;
         private static bool useSmoothedY = true;
+        private static string specificFileName;
+        private static int repeat = 1;
+        private static double time = 0;
+        private static bool useRegex = false;
+        private static bool useXRotation = false;
 
         static void Main(string[] args)
         {
@@ -30,12 +36,11 @@ namespace bvh
                     case "":
                         prevCommand = InterpretCommand(cmd);
                         break;
-                    case "-ySmoothFactor":
+                    case "-interpoFactor":
                         yRotSmoothFactor = Convert.ToDouble(cmd);
                         prevCommand = "";
                         break;
                     case "-camera":
-                        // NULL, POS, POS_YRot, XZ, XZ_YRot, XZ_YRotSmoothed
                         switch (cmd)
                         {
                             case "null": cameraOptions = CameraOptions.NULL; break;
@@ -50,6 +55,16 @@ namespace bvh
                     case "-p":
                         workingPath = cmd;
                         prevCommand = "";
+                        break;
+                    case "-file":
+                        specificFileName = cmd;
+                        prevCommand = "";
+                        break;
+                    case "-repeat":
+                        repeat = Convert.ToInt32(cmd);
+                        break;
+                    case "-time":
+                        time = Convert.ToDouble(cmd);
                         break;
                 }
             }
@@ -72,22 +87,64 @@ namespace bvh
                 case "-y":
                     workMode = WorkMode.Y;
                     break;
-                case "-ySmoothFactor":
+                case "-interpoFactor":
                     return cmd;
                 case "-camera":
                     return cmd;
                 case "-p":
                     return cmd;
-                case "-noSmoothY":
+                case "-noSmooth":
                     useSmoothedY = false;
+                    break;
+                case "-file":
+                    return cmd;
+                case "-repeat":
+                    return cmd;
+                case "-time":
+                    return cmd;
+                case "-regex":
+                    useRegex = true;
+                    break;
+                case "-x":
+                    useXRotation = true;
                     break;
             }
             return re;
         }
 
+        static void ForeachFile(Action<string> f)
+        {
+            if (specificFileName != null)
+            {
+                if (!useRegex)
+                {
+                    f($"{workingPath}/motions/{specificFileName}.txt");
+                }
+                else
+                {
+                    Regex regex = new Regex(specificFileName);
+                    foreach (var path in Directory.EnumerateFiles($"{workingPath}/motions"))
+                    {
+                        if (regex.Match(path).Success)
+                        {
+                            Console.WriteLine($"processing {path}");
+                            f(path);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                foreach (var path in Directory.EnumerateFiles($"{workingPath}/motions"))
+                {
+                    f(path);
+                }
+            }
+        }
+
         static void GenYFile(string workingPath)
         {
-            foreach (var path in Directory.EnumerateFiles($"{workingPath}/motions"))
+            ForeachFile(path =>
             {
                 string[] segs = path.Split('/', '\\');
                 string name = segs[segs.Length - 1].Split('.')[0];
@@ -95,20 +152,31 @@ namespace bvh
                 List<List<double>> data = ParseMotionJson(path);
 
                 List<double> yRotations = new List<double>();
+                double add = 0;
+
                 for (int i = 0; i < data.Count; i++)
                 {
                     var d = data[i];
-                    var qBase = QuaternionToEulerYZX(d[4], d[5], d[6], d[7]);
-                    yRotations.Add(qBase[1]);
+                    double rot = useXRotation ?
+                        GetYRotationByX(d[4], d[5], d[6], d[7]) :
+                        GetYRotationByZ(d[4], d[5], d[6], d[7]);
+
+                    if (i > 0)
+                    {
+                        if (rot + add - yRotations[i - 1] > 180) add -= 360;
+                        if (rot + add - yRotations[i - 1] < -180) add += 360;
+                    }
+
+                    yRotations.Add(rot + add);
                 }
 
                 File.WriteAllText($"{workingPath}/y/{name}.txt", String.Join("\r\n", yRotations));
-            }
+            });
         }
 
         static void GenBVH(Joint root, string workingPath)
         {
-            foreach (var path in Directory.EnumerateFiles($"{workingPath}/motions"))
+            ForeachFile(path =>
             {
                 string[] segs = path.Split('/', '\\');
                 string name = segs[segs.Length - 1].Split('.')[0];
@@ -123,16 +191,31 @@ namespace bvh
                 if (File.Exists(actPath)) vAct = ParseVectorFile(actPath);
 
                 List<List<double>> data = ParseMotionJson(path);
+                double xOffset = 2 * data.Last()[1] - data[0][1] - data[data.Count - 2][1];
+                double zOffset = 2 * data.Last()[3] - data[0][3] - data[data.Count - 2][3];
 
-                var bvhdata = ConvertMotionDataToBVHData(data);
+                if (time > 0)
+                {
+                    repeat = (int)Math.Ceiling(time / (data.Count * data[0][0]));
+                }
 
-                string bvh =
-                    GenRootDescr(root) +
-                    GenMotionHeader(data.Count, 1.0 / data[0][0], bvhdata[0][1]) +
-                    String.Join("\n", from line in bvhdata select String.Join(" ", line));
+                if (repeat > 1) Console.WriteLine($"repeat {repeat} times");
+
+                string bvh = GenRootDescr(root) + GenMotionHeader(data.Count * repeat, 1.0 / data[0][0]);
+
+                for (int i = 0; i < repeat; i++)
+                {
+                    for (int j = 0; j < data.Count; j++)
+                    {
+                        data[j][1] += xOffset;
+                        data[j][3] += zOffset;
+                    }
+                    var bvhdata = ConvertMotionDataToBVHData(data);
+                    bvh += String.Join("\n", from line in bvhdata select String.Join(" ", line)) + "\n";
+                }
 
                 File.WriteAllText($"{workingPath}/bvh/{name}.bvh", bvh);
-            }
+            });
         }
 
         static List<List<double>> ConvertMotionDataToBVHData(List<List<double>> data)
@@ -179,35 +262,19 @@ namespace bvh
                         re.AddRange(qRoot); // root rot*/
                         break;
                     case CameraOptions.POS:
+                    case CameraOptions.POS_YRot:
                         re.AddRange(new List<double> { d[1] * 20, d[2] * 20, d[3] * 20 }); // base pos
                         re.AddRange(new List<double> { 0, 0, 0 }); // base rot
                         re.AddRange(new List<double> { 0, 0, 0 }); // root pos
                         re.AddRange(qRoot); // root rot*/
                         break;
-                    case CameraOptions.POS_YRot:
-                        re.AddRange(new List<double> { d[1] * 20, d[2] * 20, d[3] * 20 }); // base pos
-                        re.AddRange(new List<double> { 0, qBase[1], 0 }); // base rot
-                        re.AddRange(new List<double> { 0, 0, 0 }); // root pos
-                        re.AddRange(new List<double> { qBase[0], 0, qBase[2] }); // root rot
-                        break;
                     case CameraOptions.XZ:
+                    case CameraOptions.XZ_YRot:
+                    case CameraOptions.XZ_YRotSmoothed:
                         re.AddRange(new List<double> { d[1] * 20, 0, d[3] * 20 }); // base pos
                         re.AddRange(new List<double> { 0, 0, 0 }); // base rot
                         re.AddRange(new List<double> { 0, d[2] * 20, 0 }); // root pos
                         re.AddRange(qRoot); // root rot
-                        break;
-                    case CameraOptions.XZ_YRot:
-                        re.AddRange(new List<double> { d[1] * 20, 0, d[3] * 20 }); // base pos
-                        re.AddRange(new List<double> { 0, qBase[1], 0 }); // base rot
-                        re.AddRange(new List<double> { 0, d[2] * 20, 0 }); // root pos
-                        re.AddRange(new List<double> { qBase[0], 0, qBase[2] }); // root rot
-                        break;
-                    case CameraOptions.XZ_YRotSmoothed:
-                        re.AddRange(new List<double> { d[1] * 20, 0, d[3] * 20 }); // base pos
-                        re.AddRange(new List<double> { 0, smoothedYRotations[i], 0 }); // base rot
-                        re.AddRange(new List<double> { 0, d[2] * 20, 0 }); // root pos
-                        double remainderYRot = qBase[1] - smoothedYRotations[i];
-                        re.AddRange(YZXToZYX(remainderYRot, qBase[0], qBase[2])); // root rot
                         break;
                 }
 
@@ -230,6 +297,22 @@ namespace bvh
                 else re.AddRange(new List<double> { 0, 0, 0 });
                 if (vAct != null) re.AddRange(vAct[i]);
                 else re.AddRange(new List<double> { 0, 0, 0 });
+
+                switch (cameraOptions)
+                {
+                    case CameraOptions.NULL:
+                    case CameraOptions.POS:
+                    case CameraOptions.XZ:
+                        re.AddRange(new List<double> { 0, 0, 0 }); // camera rot
+                        break;
+                    case CameraOptions.POS_YRot:
+                    case CameraOptions.XZ_YRot:
+                        re.AddRange(new List<double> { 0, yRotations[i], 0 }); // camera rot
+                        break;
+                    case CameraOptions.XZ_YRotSmoothed:
+                        re.AddRange(new List<double> { 0, smoothedYRotations[i], 0 }); // camera rot
+                        break;
+                }
 
                 result.Add(re);
             }

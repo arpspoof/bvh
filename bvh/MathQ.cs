@@ -1,6 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using MathNet.Spatial.Euclidean;
+using MathNet.Numerics.LinearAlgebra;
+using UnityEngine;
+using Q1 = MathNet.Spatial.Euclidean.Quaternion;
+using Q2 = UnityEngine.Quaternion;
 
 namespace bvh
 {
@@ -48,7 +52,7 @@ namespace bvh
             {
                 w = -w; x = -x; y = -y; z = -z;
             }
-            Quaternion q = new Quaternion(w, x, z, -y);
+            Q1 q = new Q1(w, x, z, -y);
 
             EulerAngles e = q.ToEulerAngles();
             //    Console.WriteLine($"q = [{w}, {x}, {y}, {z}]: rzyx = [{e.Gamma.Radians}, {e.Beta.Radians}, {e.Alpha.Radians}]");
@@ -94,9 +98,9 @@ namespace bvh
             y = (m02 - m20) / w4;
             z = (m10 - m01) / w4;
 
-            Quaternion q;
-            if (w < 0) q = new Quaternion(-w, -x, -y, -z);
-            else q = new Quaternion(w, x, y, z);
+            Q1 q;
+            if (w < 0) q = new Q1(-w, -x, -y, -z);
+            else q = new Q1(w, x, y, z);
 
             EulerAngles e = q.ToEulerAngles();
             //    Console.WriteLine($"q = [{w}, {x}, {y}, {z}]: rzyx = [{e.Gamma.Radians}, {e.Beta.Radians}, {e.Alpha.Radians}]");
@@ -109,7 +113,7 @@ namespace bvh
             };
         }
 
-        public static Quaternion EulerToQuaternion(double z, double y, double x)
+        public static Q1 EulerToQuaternion(double z, double y, double x)
         {
             double yaw = z * Math.PI / 180.0;
             double pitch = y * Math.PI / 180.0;
@@ -126,7 +130,7 @@ namespace bvh
             double yy = sy * cp * sr + cy * sp * cr;
             double zz = sy * cp * cr - cy * sp * sr;
 
-            return new Quaternion(w, xx, yy, zz);
+            return new Q1(w, xx, yy, zz);
         }
 
         public static List<double> YZXToZYX(double y, double z, double x)
@@ -153,9 +157,9 @@ namespace bvh
             y = (m02 - m20) / w4;
             z = (m10 - m01) / w4;
 
-            Quaternion q;
-            if (w < 0) q = new Quaternion(-w, -x, -y, -z);
-            else q = new Quaternion(w, x, y, z);
+            Q1 q;
+            if (w < 0) q = new Q1(-w, -x, -y, -z);
+            else q = new Q1(w, x, y, z);
 
             EulerAngles e = q.ToEulerAngles();
             return new List<double>
@@ -164,6 +168,28 @@ namespace bvh
                 e.Beta.Degrees, // y
                 e.Alpha.Degrees, // x
             };
+        }
+
+        public static double GetYRotationByZ(double w, double x, double y, double z)
+        {
+            Q2 q = new Q2((float)x, (float)y, (float)z, (float)w);
+            Vector3 afterRotation = q * Vector3.forward;
+            afterRotation.y = 0;
+            afterRotation.Normalize();
+            float cos = Vector3.Dot(afterRotation, Vector3.forward);
+            float sin = Vector3.Cross(Vector3.forward, afterRotation).y;
+            return Deg(Math.Atan2(sin, cos));
+        }
+
+        public static double GetYRotationByX(double w, double x, double y, double z)
+        {
+            Q2 q = new Q2((float)x, (float)y, (float)z, (float)w);
+            Vector3 afterRotation = q * Vector3.right;
+            afterRotation.y = 0;
+            afterRotation.Normalize();
+            float cos = Vector3.Dot(afterRotation, Vector3.right);
+            float sin = Vector3.Cross(Vector3.right, afterRotation).y;
+            return Deg(Math.Atan2(sin, cos));
         }
     }
 }
